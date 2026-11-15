@@ -138,7 +138,43 @@ If your file has no track for a stage, skip that stage and remove its entry from
 Options: `PIANO_PEDAL=0` before the piano command turns the sustain pedal off. Mix levels and panning are the `plan`
 dictionary in `mix()`.
 
-## 5. Training and evaluation
+## 5. Datasets
+
+The real recordings used for training are public but are not stored in this repository. Each one is downloaded by its
+own script into `PhysicalToneLab/runs/rnf_instruments_v7/data/`. Run the scripts from `PhysicalToneLab/runs/rnf_instruments_v7/`.
+
+| Dataset | Used for | Where it comes from | Licence | Download command |
+| --- | --- | --- | --- | --- |
+| University of Iowa Musical Instrument Samples (MIS) | Piano, crash cymbal | https://theremin.music.uiowa.edu/MIS.html | Free to use, no restrictions | `bash get_piano.sh` and `$PY fetch_crash.py` |
+| GuitarSet | Steel-string guitar | https://zenodo.org/records/3371780 | CC BY 4.0 | `$PY fetch_guitarset.py` |
+| EGFxSet | Clean electric guitar, distortion pedals, chorus | https://zenodo.org/records/7044411 | CC BY 4.0 | `$PY fetch_egfx.py` and `$PY tones/fetch_chorus.py` |
+| IDMT-SMT-Bass | Electric bass | https://zenodo.org/records/7188892 | CC BY-NC-ND 4.0 (research use, no redistribution) | `$PY fetch_bass.py` |
+| IDMT-SMT-Drums V2 | Kick, snare, hi-hat | https://zenodo.org/records/7544164 | CC BY-NC-ND 4.0 (research use, no redistribution) | `$PY drum_flow.py fetch` |
+
+- The scripts download only the files the project uses (for example 48 of GuitarSet's 180 solo takes, and the
+  fingerstyle single notes of the bass set), not the whole archives.
+- The amplifier's training data is not public: it is a synthesised guitar signal passed through a neural capture of a
+  real amplifier, made for this project. The harmonic envelopes extracted from it are included
+  (`rnf_resonant_amp_v6/envelopes.npz`), which is enough to retrain and test every amplifier model.
+- Cite the datasets if you publish results, and do not redistribute the two IDMT sets or files derived from them.
+
+**To train an instrument from scratch**, download its dataset, then run `prep`, `fit` and `check`. For example, the
+steel guitar:
+
+```bash
+$PY fetch_guitarset.py
+```
+```bash
+$PY guitar_flow.py prep
+```
+```bash
+$PY guitar_flow.py fit
+```
+```bash
+$PY guitar_flow.py check
+```
+
+## 6. Training and evaluation
 
 Run inside the folder in each heading. The usual order is `prep` (build pairs) → `fit` (train) → `check` (held-out
 numbers) → `render` (audio). `check` and `render` work with the included checkpoints; `prep` needs the raw recordings,
@@ -156,7 +192,7 @@ $PY report.py
 `train.py test` prints the test scores of every model; `report.py` draws the chart. To retrain everything:
 `bash run_all.sh`. One model: `$PY train.py fit <arm> <seed> [steps] [lr]` with arm `resonant`, `shuffled`,
 `wiener_hammerstein`, `blackbox_small`, `blackbox_large` or `blackbox_canonical`.
-`extract.py` and `render_audio.py` need the amplifier recordings folder named in section 4.2.
+`extract.py` and `render_audio.py` need the amplifier recordings folder named in section 4.2 (not public, see section 5).
 
 ### Pedals and chorus (`PhysicalToneLab/runs/rnf_instruments_v7/tones/`)
 
@@ -189,7 +225,7 @@ Example:
 $PY drum_flow.py check
 ```
 
-## 6. Results (held-out data)
+## 7. Results (held-out data)
 
 | What | Baseline | With the learned stage |
 | --- | ---: | ---: |
@@ -205,7 +241,7 @@ $PY drum_flow.py check
 
 Full logs, including failed attempts, are in the README of each run folder.
 
-## 7. Where the audio is
+## 8. Where the audio is
 
 | What | Path (under `PhysicalToneLab/runs/`) |
 | --- | --- |
@@ -215,7 +251,7 @@ Full logs, including failed attempts, are in the README of each run folder.
 | Pedals: clean, real pedal, our model | `rnf_instruments_v7/tones/audition/` |
 | Amplifier | `rnf_resonant_amp_v6/audition/` |
 
-## 8. Limits
+## 9. Limits
 
 - A MIDI file is played by the piano only. A Guitar Pro file needs its track numbers set by hand.
 - The song renderer has no bass stage; electric guitars use one trained high-gain amp.
