@@ -1,4 +1,4 @@
-# PhysicalToneLab: resonant flow on top of physical instrument models
+# ResonantFlow: resonant flow on top of physical instrument models
 
 This file is the overview of everything in `runs/`: what was built, what the measured results are, how to run each
 part, and what is still weak. Each run folder has its own README with the full log, including failed attempts.
