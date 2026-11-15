@@ -1,250 +1,99 @@
-# ResonantFlow: resonant flow on top of physical instrument models
+# ResonantFlow
 
-This file is the overview of everything in `runs/`: what was built, what the measured results are, how to run each
-part, and what is still weak. Each run folder has its own README with the full log, including failed attempts.
+Physical-model synthesizers (piano, guitars, drums) play the notes. A small learned stage, trained on real recordings,
+gives them the tone of real instruments, amplifiers and pedals.
 
-## 1. What the project is
+The learned stage is the **resonant flow** (`PhysicalToneLab/runs/rnf_resonant_amp_v6/models.py`, class `SpectralFlow`,
+3,696 parameters): eight weight-tied steps on harmonic envelopes, where harmonics may only interact in
+frequency-conserving ways (i ± j = k, i ± j ± l = k) and the interaction strengths come from one small network that
+reads frequency. Amplifiers and pedals use the full flow. Piano, guitars and drums use a restricted form that only sets
+gain and decay per note and cannot create new frequencies.
 
-Physical-model synthesizers (piano, guitars, bass, drums) produce the notes. A small learned stage, trained on real
-recordings, moves their tone toward the real instrument or the real amplifier / pedal.
-
-The learned stage is the **resonant flow** (`rnf_resonant_amp_v6/models.py`, class `SpectralFlow`, 3,696 parameters):
-
-- State: one complex envelope per harmonic (or per frequency bin for full audio).
-- 8 weight-tied steps.
-- The only nonlinear terms allowed are frequency-conserving ones: three-wave products (i ± j = k), four-wave products
-  (i ± j ± l = k) and level-dependent damping.
-- Couplings come from one small shared network that reads absolute frequency, so the same weights serve every pitch.
-
-Two forms are used:
-
-| Form | Used for | Can create new frequencies? |
-| --- | --- | --- |
-| Full resonant flow | Amplifier, distortion pedals | Yes (that is what distortion is) |
-| Restricted per-note / per-hit flow: log-gain = g(f, …) − rate · age (+ a small time-frequency network for snare and crash) | Piano, steel guitar, clean electric, bass, drums | No, it only reshapes level and decay |
-
-Novelty wording that can be defended: this specific weight-tied resonant flow on modal envelopes with shared
-frequency-conditioned couplings, plus the measured ablations. Resonant interactions and Volterra-style branches are
-known ideas. No literature search has been done.
-
-## 2. Folder map
+## 1. Folders
 
 | Folder | Contents |
 | --- | --- |
-| `rnf_resonant_amp_v6/` | The architecture, amp training, baselines, full-audio renderer |
-| `rnf_instruments_v7/` | All other instruments: piano, steel guitar, clean electric, bass, drums, snare v2, crash |
-| `rnf_instruments_v7/tones/` | Real pedals: Blues Driver, Tube Screamer, RAT, multi-tone model, chorus |
-| `rnf_song_ascend/` | Full song render (Guitar Pro tab "Ascend", first 120 s), stems, drum samples |
-| `rnf_port_study/` | Speed and latency measurements for a possible C++ port |
-| `rnf_real_v1`, `rnf_amp_port_v1`–`v4`, `rnf_string_amp_v5`, `guitar_real_v1`, `brightness_recovery_v1` | Earlier attempts, mostly negative results; kept as a record |
+| `PhysicalToneLab/runs/rnf_resonant_amp_v6/` | The architecture, amplifier training, baselines |
+| `PhysicalToneLab/runs/rnf_instruments_v7/` | Piano, steel guitar, clean electric guitar, bass, drums, crash; pedals and chorus in `tones/` |
+| `PhysicalToneLab/runs/rnf_song_ascend/` | Full-song renderer, the example tab, example mixes and stems |
+| `PhysicalToneLab/runs/rnf_port_study/` | Speed measurements |
+| `grand_piano_improved/`, `acoustic_guitar_fea/`, `electric_guitar_lead/` | The physical-model engines |
 
-The original engines are never modified: `grand_piano_improved`, `acoustic_guitar_fea`,
-`electric_guitar_lead/distortion_guitar_fea` (with `bass_fea`, `drum_set_fea`, `tone_lab`), and the earlier
-PhysicalToneLab folders. Where an engine setting had to change, it is changed in memory at render time.
+Keep this layout: the scripts find each other by relative path.
 
-## 3. Results (all on held-out data)
+## 2. Setup
 
-### Amplifier (v6) — error-to-signal ratio on harmonics, 3 seeds, lower is better
-
-| Model | Parameters | Mean test error |
-| --- | ---: | ---: |
-| Resonant flow | 3,696 | 0.090 |
-| EQ – waveshaper – EQ | 695 | 0.198 |
-| Same network, resonance rule broken (control) | 3,696 | 0.339 |
-| Black-box MLP, large | 18,768 | 0.393 |
-
-Full audio with the same weights (chords and attacks included): waveform error 0.154 / 0.157 / 0.100 on three test
-recordings (doing nothing: 0.89–0.96).
-
-### Real pedals (EGFxSet, real Stratocaster) — test error, pass rule written before training
-
-| Pedal | No model | Resonant flow (2 seeds) | Control | Best baseline | Rule |
-| --- | ---: | --- | ---: | ---: | --- |
-| Blues Driver | 0.638 | 0.030, 0.030 | 0.196 | 0.111 | Pass |
-| Tube Screamer | 0.380 | 0.052, 0.061 | 0.084 | 0.053 | Not met (tie) |
-| RAT | 0.620 | 0.052, 0.059 | 0.214 | 0.103 | Pass |
-
-One conditional network for all three pedals (5,788 parameters, 1 seed): 0.033 / 0.072 / 0.061.
-
-### Chorus (real pedal)
-
-A 75-parameter modulated-delay layer trained on the waveform. Held-out median error: 0.096 (fixed filter 0.473, clean
-0.640). This is a time-varying linear layer, not the nonlinear resonant flow.
-
-### Acoustic instruments, clean electric and drums (restricted flow)
-
-| Instrument | Measure against real notes | Physical model | With learned stage |
-| --- | --- | ---: | ---: |
-| Piano | Band error, gain stage | 2.07 | 1.78 |
-| Steel guitar | Attack error, 104 notes | 7.0 dB | 5.3 dB |
-| Clean electric | Error at 1 s, 34 notes | 8.9 dB | 6.6 dB |
-| Bass | Error at 1 s, 117 notes | 19.5 dB | 6.4 dB |
-| Snare | Attack error | 15.4 dB | 6.1 dB |
-| Kick | Body error, 60–200 ms | 16.2 dB | 10.5 dB |
-| Crash | Band error, held-out 17-inch cymbal | 8.5 dB | 2.9 dB (3.3 dB with ring partials) |
-
-### Listening verdicts by the project author
-
-- Piano chain H: approved.
-- Steel guitar, bass, kick, snare (first model): heard as better than the engine.
-- Full resonant flow on piano: rejected (added distortion). This is why acoustic instruments use the restricted form.
-- RAT song v1 and v2: rejected. v3: no verdict yet.
-- Crash with learned stage only: rejected (noise-like). With measured ring partials: no verdict yet in the song.
-- Clean electric, chorus, snare v2, piano bass fix, sustain pedal, Ascend mixes v4/v5: no verdict yet.
-
-## 4. Setup
-
-- Python: `C:\Users\Micro\miniconda3\python` (PyTorch CPU, numpy, scipy, soundfile).
-- Run from Git Bash. Set these first in every shell:
+- Python 3.10 or newer (developed on 3.13, Windows 11). CPU only; no GPU is needed.
+- About 16 GB of RAM. Run one render at a time.
 
 ```bash
-export PYTHONDONTWRITEBYTECODE=1 PYTHONIOENCODING=utf-8; PY=/c/Users/Micro/miniconda3/python
+pip install torch numpy scipy soundfile numba
 ```
 
-- The machine has 15.8 GB RAM. Run one heavy job at a time; parallel renders ran out of memory.
-- Training data is downloaded by the fetch scripts into each run's `data/` folder (not redistributed):
-  Iowa MIS (piano, crash), GuitarSet, IDMT-SMT-Bass, IDMT-SMT-Drums, EGFxSet.
-
-## 5. How to run
-
-Commands are run inside the folder named in each heading. Most scripts take a stage name; the usual order is
-`prep` (build engine/real pairs) → `fit` (train) → `check` (held-out numbers) → `render` (audio).
-Trained checkpoints already exist, so `check` and `render` work without retraining.
-
-### Check that the originals are untouched (`rnf_instruments_v7/`)
+Commands are for a Bash shell (Git Bash on Windows, or Linux/macOS). In every new shell, first run:
 
 ```bash
-$PY integrity.py verify
+export PYTHONDONTWRITEBYTECODE=1 PYTHONIOENCODING=utf-8; PY=python
 ```
 
-It must print `"changed_or_deleted": []` and `"intact": true`.
+If `python` is not the interpreter with the packages, set `PY` to its full path.
 
-### Amplifier (`rnf_resonant_amp_v6/`)
+All trained checkpoints are included, so nothing has to be trained to render audio.
 
-```bash
-$PY extract.py
-```
-```bash
-bash run_all.sh
-```
-```bash
-$PY train.py test
-```
-```bash
-$PY report.py
-```
-```bash
-$PY render_audio.py test
-```
-```bash
-$PY render_audio.py song
-```
+## 3. Render a MIDI file (piano)
 
-`extract.py` builds the paired harmonic envelopes, `run_all.sh` trains every model and seed,
-`train.py test` scores the test set, `report.py` makes the chart, and `render_audio.py` runs the trained weights on
-full audio. To train one model: `$PY train.py fit <arm> <seed> [steps] [lr]`, with arm = `resonant`, `shuffled`,
-`wiener_hammerstein`, `blackbox_small`, `blackbox_large` or `blackbox_canonical`.
+Works straight after cloning.
 
-### Pedals (`rnf_instruments_v7/tones/`)
+1. Copy your file into `grand_piano_improved/midi/` (for example `mysong.mid`). Demo files are already there.
+2. Run, giving the file name, the number of seconds to render, and a label for the output:
 
 ```bash
-$PY ../fetch_egfx.py
+cd PhysicalToneLab/runs/rnf_instruments_v7
 ```
 ```bash
-$PY tones.py extract RAT
-```
-```bash
-$PY tones.py fit RAT resonant 1
-```
-```bash
-$PY tones.py test
-```
-```bash
-$PY render_tones.py
+PIANO_LOW_CKPT=piano_low_attack PIANO_AIR_DB=12 PIANO_AIR_HZ=2000 PIANO_BASS_DB=15 PIANO_BASS_HZ=300 $PY perform_midi2.py mysong.mid 60 H
 ```
 
-Tones: `BluesDriver`, `TubeScreamer`, `RAT`. `run_all.sh` trains everything. Multi-tone model:
-`$PY cond.py fit <seed>` then `$PY cond.py test`. RAT on the song with the safety steps: `$PY render_rat_song3.py`.
+3. Output: `audition/mysong_60s_H.wav` (stereo, 44.1 kHz, 24-bit).
 
-### Chorus (`rnf_instruments_v7/tones/`)
+- Every note in the file is played as piano.
+- Give the file **name**, not a path.
+- Speed: the first 15 s of `demo10.mid` (127 notes, 20 different ones) took 21 s on a laptop CPU. Time grows with the
+  number of different notes, about one second each.
 
-```bash
-$PY fetch_chorus.py
-```
-```bash
-$PY chorus.py fit
-```
-```bash
-$PY chorus.py test
-```
-```bash
-$PY chorus.py render
-```
-```bash
-$PY render_chorus_song.py
-```
+## 4. Render a Guitar Pro file (full band)
 
-### Piano (`rnf_instruments_v7/`)
+The renderer is `PhysicalToneLab/runs/rnf_song_ascend/render_song.py`. It reads a Guitar Pro 7/8 file (`.gp`), renders
+one stem per instrument, and mixes them.
+
+### 4.1 One-time preparation
+
+Piano and drums need nothing. The steel-guitar and electric-guitar stems need two data files that are too large for the
+repository; these commands download public recordings and rebuild them:
 
 ```bash
-bash get_piano.sh
+cd PhysicalToneLab/runs/rnf_instruments_v7
 ```
 ```bash
-$PY piano_flow.py prep
+$PY fetch_guitarset.py
 ```
 ```bash
-$PY piano_decay.py fit
+$PY guitar_flow.py prep
 ```
 ```bash
-$PY piano_low.py fit
-```
-
-A MIDI file through the approved chain H needs these settings, then `perform_midi2.py <midi file> <seconds> <name>`:
-
-```bash
-PIANO_LOW_CKPT=piano_low_attack PIANO_AIR_DB=12 PIANO_AIR_HZ=2000 PIANO_BASS_DB=15 PIANO_BASS_HZ=300 $PY perform_midi2.py song.mid 120 H
-```
-
-### Steel guitar, clean electric, bass (`rnf_instruments_v7/`)
-
-Each takes `prep`, `fit`, `check`, `render`:
-
-```bash
-$PY guitar_flow.py check
+$PY fetch_egfx.py
 ```
 ```bash
-$PY electric_clean_flow.py check
-```
-```bash
-$PY bass_flow.py check
+$PY electric_clean_flow.py prep
 ```
 
-Data first: `$PY fetch_guitarset.py`, `$PY fetch_egfx.py`, `$PY fetch_bass.py`.
+### 4.2 Render the included tab
 
-### Drums (`rnf_instruments_v7/`)
+`tab/Ascend.gp`, first 120 seconds. Run the commands one after another, not in parallel:
 
 ```bash
-$PY drum_flow.py check
+cd PhysicalToneLab/runs/rnf_song_ascend
 ```
-```bash
-$PY drum_snare_v2.py check
-```
-```bash
-$PY crash_flow.py check
-```
-```bash
-$PY crash_ring.py check
-```
-
-- `drum_flow.py`: `fetch | prep | fit | check | render` (kick, snare, hi-hat).
-- `drum_snare_v2.py`: `prep | fit | check` (retrained snare).
-- Crash: `$PY fetch_crash.py`, then `crash_flow.py prep | fit | check | sample`, then `crash_ring.py fit | check | sample`.
-  `crash_tonality.py` prints how ringing or noisy each crash is.
-
-### Full song (`rnf_song_ascend/`)
-
-Run the stems one at a time, then the mix:
-
 ```bash
 $PY render_song.py piano
 ```
@@ -261,55 +110,116 @@ $PY render_song.py drums
 $PY render_song.py mix
 ```
 
-- Output: `ascend_first_120s_full_mix.flac`; stems in `stems/`.
-- The tab path, length (120 s) and mix levels are at the top of `render_song.py` and in `mix()`.
-- `PIANO_PEDAL=0` turns the sustain pedal off; `PIANO_BASS_DETUNE=1` turns the bass-note calming off.
-- `drum_samples.py` writes one file per drum piece into `drum_samples/`.
+Output: `ascend_first_120s_full_mix.flac` (stereo, 48 kHz) and one file per instrument in `stems/`.
 
-### Port study (`rnf_port_study/`)
+**The `guitars` stage does not run from this repository alone.** It reads the amplifier's training recordings from a
+folder `NeuralInstrumentStudio_Experiments/energy_v3/data/captured_amp` next to `PhysicalToneLab/`, which is not
+included. Without it, skip `guitars` and remove `guitar_lead` and `guitar_rhythm` from the `plan` dictionary in `mix()`.
+The guitar stems of the included tab are provided as audio in `stems/`.
+
+### 4.3 Use your own Guitar Pro file
+
+Edit three things in `render_song.py`:
+
+1. **File:** replace `tab/Ascend.gp` with your file under the same name, or change `GP = HERE / 'tab/Ascend.gp'`.
+   Only `.gp` (Guitar Pro 7 and 8) is read; export older formats to `.gp` first.
+2. **Length:** `SECONDS = 120.`
+3. **Track numbers** (they start at 0, in Guitar Pro's order):
+
+| Stage | Where it is set | Included tab |
+| --- | --- | --- |
+| `piano()` | `for t in (1, 2)` and `notes_of(2)` (left hand) | tracks 1, 2 |
+| `steel()` | `notes_of(4)` | track 4 |
+| `guitars()` | `(('guitar_lead', 0), ('guitar_rhythm', 3))` | tracks 0, 3 |
+| `drums()` | `parse_drum_track(GP, 5)` | track 5 |
+
+If your file has no track for a stage, skip that stage and remove its entry from `plan` in `mix()`.
+
+Options: `PIANO_PEDAL=0` before the piano command turns the sustain pedal off. Mix levels and panning are the `plan`
+dictionary in `mix()`.
+
+## 5. Training and evaluation
+
+Run inside the folder in each heading. The usual order is `prep` (build pairs) → `fit` (train) → `check` (held-out
+numbers) → `render` (audio). `check` and `render` work with the included checkpoints; `prep` needs the raw recordings,
+which the fetch scripts download.
+
+### Amplifier (`PhysicalToneLab/runs/rnf_resonant_amp_v6/`)
 
 ```bash
-$PY measure.py
+$PY train.py test
+```
+```bash
+$PY report.py
 ```
 
-Result so far: Python renders the amp 4.9× faster than real time; frames down to 12–23 ms work with the same
-weights; a naive C++ loop was 8× slower than PyTorch, so a port needs a tuned FFT library. Nothing has been ported.
+`train.py test` prints the test scores of every model; `report.py` draws the chart. To retrain everything:
+`bash run_all.sh`. One model: `$PY train.py fit <arm> <seed> [steps] [lr]` with arm `resonant`, `shuffled`,
+`wiener_hammerstein`, `blackbox_small`, `blackbox_large` or `blackbox_canonical`.
+`extract.py` and `render_audio.py` need the amplifier recordings folder named in section 4.2.
 
-## 6. Where the audio is
+### Pedals and chorus (`PhysicalToneLab/runs/rnf_instruments_v7/tones/`)
 
-| What | Path |
+```bash
+$PY tones.py test
+```
+```bash
+$PY cond.py test
+```
+
+Retrain: `$PY ../fetch_egfx.py`, then `$PY tones.py extract <tone>` and `$PY tones.py fit <tone> resonant <seed>`
+(tones: `BluesDriver`, `TubeScreamer`, `RAT`), or `bash run_all.sh` for everything. Chorus: `$PY fetch_chorus.py`, then
+`$PY chorus.py fit`, `test`, `render`.
+
+### Instruments (`PhysicalToneLab/runs/rnf_instruments_v7/`)
+
+| Instrument | Script | Stages | Data first |
+| --- | --- | --- | --- |
+| Piano | `piano_flow.py`, `piano_decay.py`, `piano_low.py` | `prep`, `fit`, `check` | `bash get_piano.sh` |
+| Steel guitar | `guitar_flow.py` | `prep`, `fit`, `check`, `render` | `$PY fetch_guitarset.py` |
+| Clean electric | `electric_clean_flow.py` | `prep`, `fit`, `check`, `render` | `$PY fetch_egfx.py` |
+| Bass | `bass_flow.py` | `prep`, `fit`, `check`, `render` | `$PY fetch_bass.py` |
+| Kick, snare, hi-hat | `drum_flow.py` | `fetch`, `prep`, `fit`, `check`, `render` | built in (`fetch`) |
+| Snare (retrained) | `drum_snare_v2.py` | `prep`, `fit`, `check` | uses the drum data |
+| Crash | `crash_flow.py`, then `crash_ring.py` | `prep`, `fit`, `check`, `sample` | `$PY fetch_crash.py` |
+
+Example:
+
+```bash
+$PY drum_flow.py check
+```
+
+## 6. Results (held-out data)
+
+| What | Baseline | With the learned stage |
+| --- | ---: | ---: |
+| Amplifier, harmonic error (plain network 0.393, same network with the rule broken 0.339) | 0.810 | 0.090 |
+| Blues Driver pedal | 0.638 | 0.030 |
+| RAT pedal | 0.620 | 0.052–0.059 |
+| Tube Screamer pedal (ties the baselines) | 0.380 | 0.052–0.061 |
+| Steel guitar, attack error | 7.0 dB | 5.3 dB |
+| Clean electric, error at 1 s | 8.9 dB | 6.6 dB |
+| Bass, error at 1 s | 19.5 dB | 6.4 dB |
+| Snare, attack error | 15.4 dB | 6.1 dB |
+| Crash, band error | 8.5 dB | 2.9 dB |
+
+Full logs, including failed attempts, are in the README of each run folder.
+
+## 7. Where the audio is
+
+| What | Path (under `PhysicalToneLab/runs/`) |
 | --- | --- |
-| Latest full song | `rnf_song_ascend/ascend_first_120s_full_mix_v5_piano_pedal.flac` |
-| Earlier song versions | `rnf_song_ascend/ascend_first_120s_full_mix_v1…v4*.flac` |
-| Drum pieces alone | `rnf_song_ascend/drum_samples/` |
-| Piano, guitar, bass, drums: engine only vs learned stage | `rnf_instruments_v7/audition/` (`*_1_engine_only`, `*_2_flow`) |
-| Pedals: clean / real pedal / our model | `rnf_instruments_v7/tones/audition/heldout_<tone>_{1_clean,2_real_pedal,3_resonant_flow}.flac` |
-| Amp | `rnf_resonant_amp_v6/audition/` |
+| Full-song mixes | `rnf_song_ascend/ascend_first_120s_full_mix_v*.flac` |
+| Stems and single drum pieces | `rnf_song_ascend/stems/`, `rnf_song_ascend/drum_samples/` |
+| Instruments, physical model alone vs with the learned stage | `rnf_instruments_v7/audition/` (`*_1_engine_only`, `*_2_flow`) |
+| Pedals: clean, real pedal, our model | `rnf_instruments_v7/tones/audition/` |
+| Amplifier | `rnf_resonant_amp_v6/audition/` |
 
-File-name rule: `engine_only` = physical model alone, `real_pedal` / `real` = a real recording,
-`flow` / `resonant_flow` / `learned` = our model's output.
+## 8. Limits
 
-## 7. What is hand-set, not learned
-
-- Piano chain H: bass and air levels, room, and the in-memory calming of bass-string detune.
-- Piano sustain pedal: a rule (change at each left-hand chord); sympathetic resonance is not modelled.
-- RAT on songs: input EQ and level matching, per-frame level retry, look-ahead limiter.
-- Crash: ring partials are measured from one real cymbal (a modal fit, not a network); crash level in the mix.
-- Snare v2 level, 12-string emulation, octave shift of two notes below the guitar's range.
-- Mix levels, panning, rooms, final limiter.
-
-## 8. Known limits
-
-- The amp is trained on a neural capture of a real amp with a synthesised guitar input, not on microphone recordings.
-- Tube Screamer does not beat the baselines (tie).
-- RAT is unstable on pick attacks and on inputs unlike its training guitar; it needs the hand safety steps.
-- Chorus is mono; flanger, phaser, delay and reverb are not done.
-- Kick rings about twice as long as the real one; bass has almost nothing above 1 kHz.
-- Snare hiss improved by only about 2 dB in the retrain.
-- Crash: 4–8 kHz is 3–9 dB too loud and 500–1000 Hz weak on the held-out cymbal.
-- Drums are trained on one real kit; crash on four cymbals.
-- Chords through the amp are the least tested case.
-- The tab has no bass track, so the song has no bass.
-- Not real time yet: frames are 46 ms; under 10 ms would need retraining.
-- Numbers come from one machine and mostly one to three seeds. Audio files were measured by the assistant, not listened to.
-
+- A MIDI file is played by the piano only. A Guitar Pro file needs its track numbers set by hand.
+- The song renderer has no bass stage; electric guitars use one trained high-gain amp.
+- Rendering is offline, not real time.
+- Mix levels, rooms, the piano's bass and air settings and the sustain-pedal rule are hand settings, not learned.
+- The amplifier was trained on a neural capture of a real amp with a synthesised guitar input.
+- Raw recordings are not included; some datasets are research-use only and must not be redistributed.
